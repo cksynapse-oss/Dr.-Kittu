@@ -1,2 +1,2 @@
-numpy==1.26.4
-pymdp==0.0.9
+numpy
+inferactively-pymdp==0.0.7

@@ -1,7 +1,5 @@
 import numpy as np
 from pymdp import utils, maths
-from pymdp.control import calc_expected_free_energy
-
 class HabitCoachAgent:
     """
     Active inference agent for personal habit & mood coaching.
@@ -73,7 +71,7 @@ class HabitCoachAgent:
             [0.1, 0.3, 0.1, 0.2],
             [0.1, 0.3, 0.5, 0.3],
             [0.1, 0.2, 0.1, 0.3]
-        ])
+        ]).T
         self.B[3] = np.array([  # soundscape
             [0.8, 0.1, 0.0, 0.1],
             [0.1, 0.3, 0.1, 0.5],
@@ -90,6 +88,7 @@ class HabitCoachAgent:
         # Prior counts for B
         self.B_counts = utils.obj_array(self.n_actions)
         for act in range(self.n_actions):
+            self.B[act] = self.B[act] / self.B[act].sum(axis=1, keepdims=True)
             self.B_counts[act] = np.ones_like(self.B[act]) * 1.0
 
         # ---- Preferences (C) ----
@@ -135,7 +134,30 @@ class HabitCoachAgent:
         Compute expected free energy for each one-step policy and return the best action index.
         Uses the current belief (self.qs).
         """
-        G = calc_expected_free_energy(self.qs, self.A, self.B, self.C, policy_len=1)
+        G = np.zeros(self.n_actions)
+        for u in range(self.n_actions):
+            # Predictive state distribution given action u
+            # B[u] has shape (n_states, n_states) where B[u][s_from, s_to] = P(s_to | s_from, u)
+            qs_prime = self.B[u].T.dot(self.qs)
+            
+            efe = 0.0
+            for m in range(len(self.n_obs)):
+                # Predictive observation distribution
+                # A[m] has shape (n_states, n_obs)
+                pred_obs = qs_prime.dot(self.A[m])
+                
+                # Expected Utility
+                eu = pred_obs.dot(np.log(self.C[m] + 1e-16))
+                
+                # Expected Ambiguity
+                H_m = -np.sum(self.A[m] * np.log(self.A[m] + 1e-16), axis=1)
+                ambiguity = qs_prime.dot(H_m)
+                
+                # EFE = Ambiguity - Expected Utility
+                efe += ambiguity - eu
+                
+            G[u] = efe
+            
         best_action = np.argmin(G)
         return best_action
 
@@ -163,7 +185,7 @@ class HabitCoachAgent:
 
         # Re-normalise A from counts
         for m in range(len(self.n_obs)):
-            self.A[m] = self.A_counts[m] / self.A_counts[m].sum(axis=0, keepdims=True)
+            self.A[m] = self.A_counts[m] / self.A_counts[m].sum(axis=1, keepdims=True)
 
         # ---- Update B (transition model) ----
         prev_state = np.argmax(prev_qs)
@@ -189,7 +211,7 @@ class HabitCoachAgent:
         self.A_counts = utils.obj_array(len(self.n_obs))
         for m, arr in enumerate(data['A_counts']):
             self.A_counts[m] = arr
-            self.A[m] = arr / arr.sum(axis=0, keepdims=True)
+            self.A[m] = arr / arr.sum(axis=1, keepdims=True)
         self.B_counts = utils.obj_array(self.n_actions)
         for a, arr in enumerate(data['B_counts']):
             self.B_counts[a] = arr
